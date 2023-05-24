@@ -6,9 +6,8 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "ParkourMovementComponent.generated.h"
 
-/**
- * 
- */
+#define OUT
+#define bDrawDebug 1
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FDashStartDelegate);
 
@@ -22,6 +21,25 @@ enum ECustomMovementMode
 	CMOVE_Hang			UMETA(DisplayName = "Hang"),
 	CMOVE_Climb			UMETA(DisplayName = "Climb"),
 	CMOVE_MAX			UMETA(Hidden),
+};
+
+/* Object Info Struct */
+USTRUCT(BlueprintType)
+struct FWallInfo {
+	GENERATED_USTRUCT_BODY()
+
+public:	
+	UPROPERTY(VisibleAnywhere)
+		float WallDistance = 5.f;
+	
+	UPROPERTY(VisibleAnywhere)
+		float wallHeight = 0.f;
+	
+	UPROPERTY(VisibleAnywhere)
+		float wallWidth = 0.f;
+
+	UPROPERTY(VisibleAnywhere)
+		float wallAngleSteep = 0.f;
 };
 
 
@@ -115,6 +133,14 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Run") UCurveFloat* WallRunGravityScaleCurve;
 	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Run") float WallJumpOffForce = 300.f;
 
+	// Wall Details
+	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Movement") float WallDistance = 100.f;
+	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Movement") float MaxWallHeight = 200.f;
+	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Movement") float MaxWallWidth = 250.f;
+	
+	// Debuggers
+	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Debug Movement") bool bWallDebug = false;
+
 #pragma endregion
 
 #pragma region Transient
@@ -202,7 +228,7 @@ private:
 	bool IsServer() const;
 	float CapR() const;
 	float CapHH() const;
-
+	void GetWallDetails(OUT FWallInfo* WallDetails);
 
 #pragma region Interface
 public:

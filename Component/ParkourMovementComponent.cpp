@@ -8,22 +8,25 @@
 #include "Net/UnrealNetwork.h"
 
 // Helper MACROS
-#if 0
-float MacroDuration = 2.f;
-#definde DLOG(x, c) GEngine->AddOnScreenDebugMessage(-1, MacroDuration ? MacroDuration : -1.f, c, x)
+#if bDrawDebug
+float MacroDuration = 8.f;
+#define DLOG(x, c) GEngine->AddOnScreenDebugMessage(-1, MacroDuration ? MacroDuration : -1.f, c, x)
 #define POINT(x, c) DrawDebugPoint(GetWorld(), x, 10, c, !MacroDuration, MacroDuration);
 #define LINE(x1, x2, c) DrawDebugLine(GetWorld(), x1, x2, c, !MacroDuration, MacroDuration);
 #define CAPSULE(x, c) DrawDebugCapsule(GetWorld(), x, CapHH(), CapR(), FQuat::Identity, c, !MacroDuration, MacroDuration);
+#define BOX(x, y, c) DrawDebugBox(GetWorld(), x, y, c, !MacroDuration, MacroDuration);
 #else
 #define DLOG(x, c)
 #define POINT(x, c)
 #define LINE(x1, x2, c)
 #define CAPSULE(x, c)
+#define BOX(x, y, c)
 #endif
 
 #define SLOG(x) GEngine->AddOnScreenDebugMessage(-1, 5.f ? 5.f : -1.f, FColor::Green, x);
 
 
+			
 #pragma region SAVED MOVE
 UParkourMovementComponent::FSavedMove_Parkour::FSavedMove_Parkour()
 {
@@ -224,6 +227,11 @@ bool UParkourMovementComponent::DoJump(bool bReplayingMoves)
 			FHitResult WallHit;
 			GetWorld()->LineTraceSingleByProfile(WallHit, Start, End, "BlockAll", Params);
 			Velocity += WallHit.Normal * WallJumpOffForce;
+		}
+		else
+		{
+			FWallInfo* WallInfo = new FWallInfo();
+			GetWallDetails(WallInfo);
 		}
 
 		return true;
@@ -795,6 +803,126 @@ float UParkourMovementComponent::CapR() const
 float UParkourMovementComponent::CapHH() const
 {
 	return CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+}
+
+/// <summary>
+///	Used for getting Wall related Information.
+/// Debug Green indicate width and cyan indicates height.
+/// </summary>
+/// <param name="WallDetails"> - Fill the struct with info related to the wall detected.</param>
+void UParkourMovementComponent::GetWallDetails(OUT FWallInfo* WallDetails)
+{
+	// Retrieve Info
+	FVector BaseLoc = UpdatedComponent->GetComponentLocation() + FVector::DownVector * CapHH();
+	FVector Fwd = UpdatedComponent->GetForwardVector().GetSafeNormal2D();
+	auto Params = ParkourCharacterOwner->GetIgnoreCharacterParams();
+
+	// Raycasting front wall.
+	FHitResult FrontHit;
+	float checkDistance = FMath::Clamp(Velocity | Fwd, CapR() + 30, WallDistance);
+	FVector	FrontStart = BaseLoc + FVector::UpVector * (MaxStepHeight - 1);
+
+	for (int i = 0; i < 6; i++)
+	{
+		LINE(FrontStart, FrontStart + Fwd * checkDistance, FColor::Yellow);
+		if (GetWorld()->LineTraceSingleByProfile(FrontHit, FrontStart, FrontStart + Fwd * checkDistance, "BlockAll", Params)) break;
+		FrontStart += FVector::UpVector * (2.f * CapHH() - (MaxStepHeight - 1)) / 5;
+	}
+
+	// Checking if wall is there or not.
+	if (!FrontHit.IsValidBlockingHit()) return;
+	
+	// Distance To Wall
+	WallDetails->WallDistance = (FrontHit.Location - GetActorLocation()).Length();
+
+	// Steepness of Wall : Angle 90deg is 1 and Angle 0deg is 0.
+	WallDetails->wallAngleSteep = FrontHit.Normal | FVector::UpVector;
+	
+	TArray<FHitResult> HeightHits;
+	FHitResult SurfaceHit;
+	FVector WallUp = FVector::VectorPlaneProject(FVector::UpVector, FrontHit.Normal).GetSafeNormal();
+	float WallCos = FVector::UpVector | FrontHit.Normal;
+	float WallSin = FMath::Sqrt(1 - WallCos * WallCos);
+	FVector TraceStart = FrontHit.Location + Fwd + WallUp * (MaxWallHeight - (MaxStepHeight - 1)) / WallSin;
+
+	POINT(FrontHit.Location, FColor::Magenta);
+	POINT(TraceStart, FColor::Magenta);
+	LINE(TraceStart, FrontHit.Location + Fwd, FColor::Purple);
+
+	// Collision Query Params.
+	Params.bFindInitialOverlaps = false;
+	Params.bTraceComplex = true;
+
+	// Finding the closest wall from the top. Set Wall Height
+	bool btraced = GetWorld()->LineTraceMultiByProfile(HeightHits, TraceStart, FrontHit.Location + Fwd, "BlockAll", Params);
+	if (!btraced) return;
+		
+	for (const FHitResult& Hit : HeightHits)
+	{
+		if (Hit.IsValidBlockingHit())
+		{
+			SurfaceHit = Hit;
+			POINT(SurfaceHit.Location, FColor::Magenta);
+		}
+	}
+
+	if (SurfaceHit.IsValidBlockingHit())
+	{
+		WallDetails->wallHeight = (SurfaceHit.Location - BaseLoc) | FVector::UpVector;
+	}
+
+	// Check Width
+	FVector WidthTraceEnd = (FrontHit.Normal * MaxWallWidth * -1) + Fwd + FrontHit.Location;
+
+	FHitResult WidthHit;
+	TArray<FHitResult> WidthHits;
+	btraced = GetWorld()->LineTraceMultiByProfile(WidthHits, WidthTraceEnd, FrontHit.Location, "BlockAll", Params);
+	LINE(FrontHit.Location, WidthTraceEnd, FColor::Purple);
+	POINT(WidthTraceEnd, FColor::Green);
+
+	if (!btraced) return;
+
+	for (const FHitResult& Hit : WidthHits)
+	{
+		if (Hit.IsValidBlockingHit())
+		{
+			POINT(Hit.Location, FColor::Green);
+			WidthHit = Hit;
+			break;
+		}
+	}
+
+	WallDetails->wallWidth = (WidthHit.Location - FrontHit.Location).Length();
+	if (WallDetails->wallWidth > MaxWallWidth + 10.f)
+	{
+		WallDetails->wallWidth = -1.f;
+	}
+
+	// Check for clearance
+	float SurfaceCos = FVector::UpVector | SurfaceHit.Normal;
+	float SurfaceSin = FMath::Sqrt(1 - SurfaceCos * SurfaceCos);
+	FVector ClearCollisionLoc = SurfaceHit.Location + Fwd * CapR() + FVector::UpVector * (CapHH() + 1 + CapR() * 2 * SurfaceSin);
+	FVector BoxSize = FVector(CapHH(), CapR(), CapHH());
+	FCollisionShape BoxShape = FCollisionShape::MakeBox(BoxSize);
+
+	if (GetWorld()->OverlapAnyTestByProfile(ClearCollisionLoc, FQuat::Identity, "BlockAll", BoxShape, Params))
+	{
+		BOX(ClearCollisionLoc, BoxSize, FColor::Red);
+		SLOG(FString::Printf(TEXT("NO CLEARANCE!")));
+	}
+	else
+	{
+		BOX(ClearCollisionLoc, BoxSize, FColor::Green);
+	}
+
+
+	if (bWallDebug)
+	{	
+		DLOG(FString::Printf(TEXT("Width: %f"), WallDetails->wallWidth), FColor::Yellow);
+		DLOG(FString::Printf(TEXT("Height: %f"), WallDetails->wallHeight), FColor::Yellow);
+		DLOG(FString::Printf(TEXT("Distance to wall: %f"), WallDetails->WallDistance), FColor::Yellow);
+		DLOG(FString::Printf(TEXT("Wall Details")), FColor::Magenta);
+	}
 }
 
 #pragma endregion

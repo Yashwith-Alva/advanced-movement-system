@@ -7,8 +7,8 @@
 
 // Helper Macros
 #if 1
-float MacroDuration = 2.f;
-#define SLOG(c, x) GEngine->AddOnScreenDebugMessage(-1, MacroDuration ? MacroDuration : -1.f, c, FString::Printf(TEXT(x)));
+float WriteDuration = 2.f;
+#define SLOG(c, x) GEngine->AddOnScreenDebugMessage(-1, WriteDuration ? WriteDuration : -1.f, c, FString::Printf(TEXT(x)));
 #else
 #define SLOG(x, y);
 #endif
@@ -103,8 +103,7 @@ void AParkourCharacter::Turn(float Value)
 
 void AParkourCharacter::LookUp(float Value)
 {
-	//if(!GetCharacterMovement()->IsFalling())
-		AddControllerPitchInput(Value);
+	AddControllerPitchInput(Value);
 }
 
 void AParkourCharacter::ParkourJump()
