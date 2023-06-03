@@ -6,32 +6,7 @@
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/Character.h"
 #include "Net/UnrealNetwork.h"
-
-// Helper MACROS
-#if 1
-float MacroDuration = 8.f;
-#define DLOG(x, c) GEngine->AddOnScreenDebugMessage(-1, MacroDuration ? MacroDuration : -1.f, c, x)
-#define BOX(x, y, c) DrawDebugBox(GetWorld(), x, y, c, !MacroDuration, MacroDuration);
-#define LINE(x1, x2, c) DrawDebugLine(GetWorld(), x1, x2, c, !MacroDuration, MacroDuration);
-#define ARROW(x, y, d, c) DrawDebugDirectionalArrow(GetWorld(), x, y, d, c, false, MacroDuration);
-#define POINT(x, c) DrawDebugPoint(GetWorld(), x, 10, c, !MacroDuration, MacroDuration);
-#define CAPSULE(x, c) DrawDebugCapsule(GetWorld(), x, CapHH(), CapR(), FQuat::Identity, c, !MacroDuration, MacroDuration);
-#define BOXROTATE(x, y, r, c) DrawDebugBox(GetWorld(), x, y, r, c, false, MacroDuration);
-#else
-#define DLOG(x, c)
-#define BOX(x, y, c)
-#define LINE(x1, x2, c)
-#define ARROW(x, y, d, c)
-#define POINT(x, c)
-#define CAPSULE(x, c)
-#define BOXROTATE(x, y, r, c)
-#endif
-
-#define SLOG(x) GEngine->AddOnScreenDebugMessage(-1, 5.f ? 5.f : -1.f, FColor::Green, x);
-
-#if 0
-	#define DRAW_CLEARANCE
-#endif
+#include "../Parkour.h"
 
 #pragma region SAVED MOVE
 UParkourMovementComponent::FSavedMove_Parkour::FSavedMove_Parkour()
@@ -113,7 +88,6 @@ uint8 UParkourMovementComponent::FSavedMove_Parkour::GetCompressedFlags() const
 
 #pragma endregion
 
-
 #pragma region Client Network Prediction Data
 UParkourMovementComponent::FNetworkPredictionData_Client_Parkour::FNetworkPredictionData_Client_Parkour(const UCharacterMovementComponent& ClientMovement)
 	: Super(ClientMovement)
@@ -127,12 +101,10 @@ FSavedMovePtr UParkourMovementComponent::FNetworkPredictionData_Client_Parkour::
 
 #pragma endregion
 
-
 UParkourMovementComponent::UParkourMovementComponent()
 {
 	NavAgentProps.bCanCrouch = true;
 }
-
 
 #pragma region CMC
 
@@ -246,7 +218,6 @@ bool UParkourMovementComponent::DoJump(bool bReplayingMoves)
 
 #pragma endregion
 
-
 #pragma region MOVEMENT PIPELINE
 
 void UParkourMovementComponent::UpdateCharacterStateBeforeMovement(float DeltaSeconds)
@@ -280,7 +251,7 @@ void UParkourMovementComponent::UpdateCharacterStateBeforeMovement(float DeltaSe
 		}
 		else
 		{
-			SLOG("Client Tried to cheat");
+			DLOG(FString::Printf(TEXT("Client Tried to cheat")), FColor::Red);
 			UE_LOG(LogTemp, Warning, TEXT("Client tried to cheat"))
 		}
 	}
@@ -365,7 +336,6 @@ void UParkourMovementComponent::OnMovementModeChanged(EMovementMode PreviousMove
 }
 
 #pragma endregion
-
 
 #pragma region SLIDE
 void UParkourMovementComponent::EnterSlide(EMovementMode PrevMode, ECustomMovementMode PrevCustomMode)
@@ -601,7 +571,6 @@ void UParkourMovementComponent::PhysSlide(float deltaTime, int32 Iterations)
 
 #pragma endregion
 
-
 #pragma region DASH
 
 void UParkourMovementComponent::OnDashCooldownFinished()
@@ -626,7 +595,6 @@ void UParkourMovementComponent::PerformDash()
 }
 
 #pragma endregion
-
 
 #pragma region WALL RUN
 bool UParkourMovementComponent::TryWallRun()
@@ -678,7 +646,7 @@ bool UParkourMovementComponent::TryWallRun()
 	Velocity = ProjectedVelocity;
 	Velocity.Z = FMath::Clamp(Velocity.Z, 0.f, MaxVerticalWallRunSpeed);
 	SetMovementMode(MOVE_Custom, CMOVE_WallRun);
-	SLOG("Starting WallRun!");
+	DLOG(FString::Printf(TEXT("Tried to Wall Run!")), FColor::Green);
 	return true;
 }
 
@@ -792,7 +760,6 @@ void UParkourMovementComponent::PhysWallRun(float deltaTime, int32 Iterations)
 
 #pragma endregion
 
-
 #pragma region PARKOUR
 bool UParkourMovementComponent::TryParkour(FWallInfo* WallInfo)
 {
@@ -801,7 +768,6 @@ bool UParkourMovementComponent::TryParkour(FWallInfo* WallInfo)
 }
 
 #pragma endregion
-
 
 #pragma region HELPERS
 bool UParkourMovementComponent::IsServer() const
@@ -980,16 +946,26 @@ void UParkourMovementComponent::GetWallDetails(OUT FWallInfo* WallDetails)
 	}
 #endif
 
-
 	if (bWallDebug)
 	{	
-		DLOG(FString::Printf(TEXT("Angle Steep: %f"), WallDetails->wallAngleSteep), FColor::Yellow);
-		DLOG(FString::Printf(TEXT("Width: %f"), WallDetails->wallWidth), FColor::Yellow);
-		DLOG(FString::Printf(TEXT("Height: %f"), WallDetails->wallHeight), FColor::Yellow);
-		DLOG(FString::Printf(TEXT("Distance to wall: %f"), WallDetails->WallDistance), FColor::Yellow);
-		DLOG(FString::Printf(TEXT("Wall Details")), FColor::Magenta);
-		DLOG(FString::Printf(TEXT("**********---------**********")), FColor::Black);
+		DisplayWallDetails(WallDetails);
 	}
+}
+
+void UParkourMovementComponent::DisplayWallDetails(OUT FWallInfo* WallInfo)
+{
+	LOG(FString::Printf(TEXT("********* *********")), FColor::Black);
+
+	LOG(FString::Printf(TEXT("Distance To Right: %f"), WallInfo->ClearanceRightDistance), FColor::Yellow);
+	LOG(FString::Printf(TEXT("Distance To Left: %f"), WallInfo->ClearanceLeftDistance), FColor::Cyan);
+	LOG(FString::Printf(TEXT("Top Location: %s"), *WallInfo->wallSurfaceLocation.ToString()), FColor::Cyan);
+	LOG(FString::Printf(TEXT("*#*")), FColor::White);
+	LOG(FString::Printf(TEXT("Angle: %f"), WallInfo->wallAngleSteep), FColor::Green);
+	LOG(FString::Printf(TEXT("Distance to Wall: %f"), WallInfo->WallDistance), FColor::Green);
+	LOG(FString::Printf(TEXT("Width: %f"), WallInfo->wallWidth), FColor::Green);
+	LOG(FString::Printf(TEXT("Height: %f"), WallInfo->wallHeight), FColor::Green);
+	
+	LOG(FString::Printf(TEXT("Wall Details")), FColor::Magenta);
 }
 
 #pragma endregion

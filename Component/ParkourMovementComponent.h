@@ -290,9 +290,12 @@ private:
 
 #pragma endregion
 
-
 #pragma region DEBUGGERS
+	void DisplayWallDetails(OUT FWallInfo* WallInfo);
+	
 	UPROPERTY(EditDefaultsOnly, Category = "Debugging")
 		bool bDebugSlide;
+
 #pragma endregion
+
 };
