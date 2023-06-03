@@ -23,23 +23,53 @@ enum ECustomMovementMode
 	CMOVE_MAX			UMETA(Hidden),
 };
 
+/* Wall Adjust Enum */
+UENUM(BlueprintType)
+enum EWallAdjustSide 
+{
+	EWAS_None	UMETA(DisplayName = "None"),
+	EWAS_Right  UMETA(DisplayName = "Right"),
+	EWAS_Left   UMETA(DisplayName = "Left"),
+	EWAS_MAX	UMETA(Hidden)
+};
+
 /* Object Info Struct */
 USTRUCT(BlueprintType)
 struct FWallInfo {
 	GENERATED_USTRUCT_BODY()
 
 public:	
+	/* Distance to the wall */
 	UPROPERTY(VisibleAnywhere)
 		float WallDistance = 5.f;
 	
+	/* Height of the wall */
 	UPROPERTY(VisibleAnywhere)
 		float wallHeight = 0.f;
 	
+	/* Width of the wall */
 	UPROPERTY(VisibleAnywhere)
 		float wallWidth = 0.f;
 
+	/* Angle of the wall in cos */
 	UPROPERTY(VisibleAnywhere)
 		float wallAngleSteep = 0.f;
+	
+	/* Distance on left side */
+	UPROPERTY(VisibleAnywhere)
+		float ClearanceLeftDistance = 0.f;
+
+	/* Distance on right side*/
+	UPROPERTY(VisibleAnywhere)
+		float ClearanceRightDistance = 0.f;
+
+	/* Wall Climb spot */
+	UPROPERTY(VisibleAnywhere)
+		FVector wallSurfaceLocation = FVector::ZeroVector;
+
+	/* Vector indicates right side wrt character position */
+	UPROPERTY(VisibleAnywhere)
+		FVector wallEdgeVector = FVector::ZeroVector;
 };
 
 
@@ -137,6 +167,11 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Movement") float WallDistance = 100.f;
 	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Movement") float MaxWallHeight = 200.f;
 	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Movement") float MaxWallWidth = 250.f;
+	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Movement") float ClearanceHeight = 150.f;
+	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Movement") float ClearanceWidth = 100.f;
+	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Movement") float ClearanceDepth = 100.f;
+	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Movement") float ClearanceEdgeLen = 100.f;
+
 	
 	// Debuggers
 	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Debug Movement") bool bWallDebug = false;
@@ -221,6 +256,9 @@ private:
 	// WallRun
 	bool TryWallRun();
 	void PhysWallRun(float deltaTime, int32 Iterations);
+
+	// Parkour
+	bool TryParkour(FWallInfo* WallInfo);
 
 #pragma endregion
 

@@ -8,25 +8,31 @@
 #include "Net/UnrealNetwork.h"
 
 // Helper MACROS
-#if bDrawDebug
+#if 1
 float MacroDuration = 8.f;
 #define DLOG(x, c) GEngine->AddOnScreenDebugMessage(-1, MacroDuration ? MacroDuration : -1.f, c, x)
-#define POINT(x, c) DrawDebugPoint(GetWorld(), x, 10, c, !MacroDuration, MacroDuration);
-#define LINE(x1, x2, c) DrawDebugLine(GetWorld(), x1, x2, c, !MacroDuration, MacroDuration);
-#define CAPSULE(x, c) DrawDebugCapsule(GetWorld(), x, CapHH(), CapR(), FQuat::Identity, c, !MacroDuration, MacroDuration);
 #define BOX(x, y, c) DrawDebugBox(GetWorld(), x, y, c, !MacroDuration, MacroDuration);
+#define LINE(x1, x2, c) DrawDebugLine(GetWorld(), x1, x2, c, !MacroDuration, MacroDuration);
+#define ARROW(x, y, d, c) DrawDebugDirectionalArrow(GetWorld(), x, y, d, c, false, MacroDuration);
+#define POINT(x, c) DrawDebugPoint(GetWorld(), x, 10, c, !MacroDuration, MacroDuration);
+#define CAPSULE(x, c) DrawDebugCapsule(GetWorld(), x, CapHH(), CapR(), FQuat::Identity, c, !MacroDuration, MacroDuration);
+#define BOXROTATE(x, y, r, c) DrawDebugBox(GetWorld(), x, y, r, c, false, MacroDuration);
 #else
 #define DLOG(x, c)
-#define POINT(x, c)
-#define LINE(x1, x2, c)
-#define CAPSULE(x, c)
 #define BOX(x, y, c)
+#define LINE(x1, x2, c)
+#define ARROW(x, y, d, c)
+#define POINT(x, c)
+#define CAPSULE(x, c)
+#define BOXROTATE(x, y, r, c)
 #endif
 
 #define SLOG(x) GEngine->AddOnScreenDebugMessage(-1, 5.f ? 5.f : -1.f, FColor::Green, x);
 
+#if 0
+	#define DRAW_CLEARANCE
+#endif
 
-			
 #pragma region SAVED MOVE
 UParkourMovementComponent::FSavedMove_Parkour::FSavedMove_Parkour()
 {
@@ -128,7 +134,7 @@ UParkourMovementComponent::UParkourMovementComponent()
 }
 
 
-#pragma region Character Movement Component
+#pragma region CMC
 
 void UParkourMovementComponent::InitializeComponent()
 {
@@ -216,6 +222,9 @@ bool UParkourMovementComponent::DoJump(bool bReplayingMoves)
 {
 	bool bWasWallRunning = IsWallRunning();
 
+	FWallInfo* WallInfo = new FWallInfo();
+	GetWallDetails(WallInfo);
+
 	if (Super::DoJump(bReplayingMoves))
 	{
 		if (bWasWallRunning)
@@ -228,11 +237,6 @@ bool UParkourMovementComponent::DoJump(bool bReplayingMoves)
 			GetWorld()->LineTraceSingleByProfile(WallHit, Start, End, "BlockAll", Params);
 			Velocity += WallHit.Normal * WallJumpOffForce;
 		}
-		else
-		{
-			FWallInfo* WallInfo = new FWallInfo();
-			GetWallDetails(WallInfo);
-		}
 
 		return true;
 	}
@@ -243,7 +247,7 @@ bool UParkourMovementComponent::DoJump(bool bReplayingMoves)
 #pragma endregion
 
 
-#pragma region Movement Pipeline
+#pragma region MOVEMENT PIPELINE
 
 void UParkourMovementComponent::UpdateCharacterStateBeforeMovement(float DeltaSeconds)
 {
@@ -363,7 +367,7 @@ void UParkourMovementComponent::OnMovementModeChanged(EMovementMode PreviousMove
 #pragma endregion
 
 
-#pragma region Slide
+#pragma region SLIDE
 void UParkourMovementComponent::EnterSlide(EMovementMode PrevMode, ECustomMovementMode PrevCustomMode)
 {
 	bWantsToCrouch = true;
@@ -789,6 +793,16 @@ void UParkourMovementComponent::PhysWallRun(float deltaTime, int32 Iterations)
 #pragma endregion
 
 
+#pragma region PARKOUR
+bool UParkourMovementComponent::TryParkour(FWallInfo* WallInfo)
+{
+
+	return false;
+}
+
+#pragma endregion
+
+
 #pragma region HELPERS
 bool UParkourMovementComponent::IsServer() const
 {
@@ -812,10 +826,11 @@ float UParkourMovementComponent::CapHH() const
 /// <param name="WallDetails"> - Fill the struct with info related to the wall detected.</param>
 void UParkourMovementComponent::GetWallDetails(OUT FWallInfo* WallDetails)
 {
-	// Retrieve Info
+	// Retrieve Basic Info
 	FVector BaseLoc = UpdatedComponent->GetComponentLocation() + FVector::DownVector * CapHH();
 	FVector Fwd = UpdatedComponent->GetForwardVector().GetSafeNormal2D();
 	auto Params = ParkourCharacterOwner->GetIgnoreCharacterParams();
+	FVector TopHit;
 
 	// Raycasting front wall.
 	FHitResult FrontHit;
@@ -838,22 +853,27 @@ void UParkourMovementComponent::GetWallDetails(OUT FWallInfo* WallDetails)
 	// Steepness of Wall : Angle 90deg is 1 and Angle 0deg is 0.
 	WallDetails->wallAngleSteep = FrontHit.Normal | FVector::UpVector;
 	
-	TArray<FHitResult> HeightHits;
-	FHitResult SurfaceHit;
+	// Collision Query Params.
+	Params.bFindInitialOverlaps = false;
+	Params.bTraceComplex = true;
+
+	// Wall Vector and Angle
 	FVector WallUp = FVector::VectorPlaneProject(FVector::UpVector, FrontHit.Normal).GetSafeNormal();
 	float WallCos = FVector::UpVector | FrontHit.Normal;
 	float WallSin = FMath::Sqrt(1 - WallCos * WallCos);
+
+
+#pragma region ** Wall Height
+	// Finding the closest wall from the top. Set Wall Height
+
+	TArray<FHitResult> HeightHits;
+	FHitResult SurfaceHit;
 	FVector TraceStart = FrontHit.Location + Fwd + WallUp * (MaxWallHeight - (MaxStepHeight - 1)) / WallSin;
 
 	POINT(FrontHit.Location, FColor::Magenta);
 	POINT(TraceStart, FColor::Magenta);
 	LINE(TraceStart, FrontHit.Location + Fwd, FColor::Purple);
 
-	// Collision Query Params.
-	Params.bFindInitialOverlaps = false;
-	Params.bTraceComplex = true;
-
-	// Finding the closest wall from the top. Set Wall Height
 	bool btraced = GetWorld()->LineTraceMultiByProfile(HeightHits, TraceStart, FrontHit.Location + Fwd, "BlockAll", Params);
 	if (!btraced) return;
 		
@@ -862,24 +882,32 @@ void UParkourMovementComponent::GetWallDetails(OUT FWallInfo* WallDetails)
 		if (Hit.IsValidBlockingHit())
 		{
 			SurfaceHit = Hit;
-			POINT(SurfaceHit.Location, FColor::Magenta);
+			TopHit = SurfaceHit.Location;
+			WallDetails->wallSurfaceLocation = TopHit;
+			POINT(TopHit, FColor::Magenta);
 		}
 	}
 
 	if (SurfaceHit.IsValidBlockingHit())
 	{
-		WallDetails->wallHeight = (SurfaceHit.Location - BaseLoc) | FVector::UpVector;
+		WallDetails->wallHeight = (TopHit - BaseLoc) | FVector::UpVector;
+	}
+	else
+	{
+		return;
 	}
 
-	// Check Width
-	FVector WidthTraceEnd = (FrontHit.Normal * MaxWallWidth * -1) + Fwd + FrontHit.Location;
+#pragma endregion
 
+#pragma region ** Wall Width
 	FHitResult WidthHit;
 	TArray<FHitResult> WidthHits;
-	btraced = GetWorld()->LineTraceMultiByProfile(WidthHits, WidthTraceEnd, FrontHit.Location, "BlockAll", Params);
-	LINE(FrontHit.Location, WidthTraceEnd, FColor::Purple);
-	POINT(WidthTraceEnd, FColor::Green);
+	FVector WidthTraceStart = FrontHit.Location + Fwd + (FrontHit.Normal.GetSafeNormal2D() * MaxWallWidth * -1);
 
+	LINE(FrontHit.Location, WidthTraceStart, FColor::Purple);
+	POINT(WidthTraceStart, FColor::Green);
+	
+	btraced = GetWorld()->LineTraceMultiByProfile(WidthHits, WidthTraceStart, FrontHit.Location, "BlockAll", Params);
 	if (!btraced) return;
 
 	for (const FHitResult& Hit : WidthHits)
@@ -898,37 +926,76 @@ void UParkourMovementComponent::GetWallDetails(OUT FWallInfo* WallDetails)
 		WallDetails->wallWidth = -1.f;
 	}
 
-	// Check for clearance
-	float SurfaceCos = FVector::UpVector | SurfaceHit.Normal;
-	float SurfaceSin = FMath::Sqrt(1 - SurfaceCos * SurfaceCos);
-	FVector ClearCollisionLoc = SurfaceHit.Location + Fwd * CapR() + FVector::UpVector * (CapHH() + 1 + CapR() * 2 * SurfaceSin);
-	FVector BoxSize = FVector(CapHH(), CapR(), CapHH());
-	FCollisionShape BoxShape = FCollisionShape::MakeBox(BoxSize);
+#pragma endregion
 
-	if (GetWorld()->OverlapAnyTestByProfile(ClearCollisionLoc, FQuat::Identity, "BlockAll", BoxShape, Params))
+#pragma region ** Vault Location Details
+	FVector EdgeVector = FrontHit.Normal ^ WallUp;
+	FVector EdgeRight = TopHit + EdgeVector.GetSafeNormal2D() * ClearanceEdgeLen + Fwd;
+	FVector EdgeLeft = TopHit - EdgeVector.GetSafeNormal2D() * ClearanceEdgeLen + Fwd;
+	WallDetails->wallEdgeVector = EdgeVector;
+	FHitResult EdgeWallHit;
+	
+	// Distance On Right
+	if (GetWorld()->LineTraceSingleByProfile(EdgeWallHit, TopHit, EdgeRight, "BlockAll", Params))
 	{
-		BOX(ClearCollisionLoc, BoxSize, FColor::Red);
-		SLOG(FString::Printf(TEXT("NO CLEARANCE!")));
+		WallDetails->ClearanceRightDistance = (EdgeWallHit.Location - TopHit).Length();
+		ARROW(EdgeWallHit.Location, TopHit, 8.f, FColor::Red);
 	}
 	else
 	{
-		BOX(ClearCollisionLoc, BoxSize, FColor::Green);
+		WallDetails->ClearanceRightDistance = ClearanceEdgeLen;
+		ARROW(EdgeRight, TopHit, 8.f, FColor::Orange);
 	}
+	
+	// Distance on Left
+	if (GetWorld()->LineTraceSingleByProfile(EdgeWallHit, TopHit, EdgeLeft, "BlockAll", Params))
+	{
+		WallDetails->ClearanceLeftDistance = (EdgeWallHit.Location - TopHit).Length();
+		ARROW(EdgeWallHit.Location, TopHit, 8.f, FColor::Red);
+	}
+	else
+	{
+		WallDetails->ClearanceLeftDistance = ClearanceEdgeLen;
+		ARROW(EdgeLeft, TopHit, 8.f, FColor::Cyan);
+	}
+#pragma endregion
+
+#ifdef DRAW_CLEARANCE
+	float SurfaceCos = FVector::UpVector | SurfaceHit.Normal;
+	float SurfaceSin = FMath::Sqrt(1 - SurfaceCos * SurfaceCos);
+
+	FVector ClearCollisionLoc = TopHit + FrontHit.Normal.GetSafeNormal2D() * (ClearanceDepth + 1) * -1 + FVector::UpVector * (ClearanceHeight + 1);
+	FQuat ClearCollisionRot = FRotationMatrix::MakeFromX(FrontHit.Normal.GetSafeNormal2D()).ToQuat();
+	FVector ClearCollisionSize = FVector(ClearanceDepth, ClearanceWidth, ClearanceHeight);
+	FCollisionShape BoxShape = FCollisionShape::MakeBox(ClearCollisionSize);
+
+	if (GetWorld()->OverlapAnyTestByProfile(ClearCollisionLoc, ClearCollisionRot, "BlockAll", BoxShape, Params))
+	{
+		BOXROTATE(ClearCollisionLoc, ClearCollisionSize, ClearCollisionRot, FColor::Red);
+		DLOG(FString::Printf(TEXT("Can't Fit Through!")), FColor::Red);
+	}
+	else
+	{
+		BOXROTATE(ClearCollisionLoc, ClearCollisionSize, ClearCollisionRot, FColor::Green);
+	}
+#endif
 
 
 	if (bWallDebug)
 	{	
+		DLOG(FString::Printf(TEXT("Angle Steep: %f"), WallDetails->wallAngleSteep), FColor::Yellow);
 		DLOG(FString::Printf(TEXT("Width: %f"), WallDetails->wallWidth), FColor::Yellow);
 		DLOG(FString::Printf(TEXT("Height: %f"), WallDetails->wallHeight), FColor::Yellow);
 		DLOG(FString::Printf(TEXT("Distance to wall: %f"), WallDetails->WallDistance), FColor::Yellow);
 		DLOG(FString::Printf(TEXT("Wall Details")), FColor::Magenta);
+		DLOG(FString::Printf(TEXT("**********---------**********")), FColor::Black);
 	}
 }
 
 #pragma endregion
 
 
-#pragma region Interface
+#pragma region INTERFACE
 void UParkourMovementComponent::DashPressed()
 {
 	float CurrentTime = GetWorld()->GetTimeSeconds();

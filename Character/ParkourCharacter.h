@@ -42,18 +42,14 @@ protected:
 
 protected:
 	virtual void MoveForward(float Value);
-
 	virtual	void MoveRight(float Value);
-
 	void Turn(float Value);
-
 	void LookUp(float Value);
-
 	virtual void ParkourJump();
-
 	virtual void ParkourCrouch();
-
 	virtual void Slide();
+	virtual void DashPressed();
+	virtual void DashReleased();
 
 #pragma endregion
 

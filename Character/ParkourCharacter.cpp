@@ -27,7 +27,7 @@ AParkourCharacter::AParkourCharacter(const FObjectInitializer& ObjectInitializer
 	GetCharacterMovement()->bOrientRotationToMovement = true;
 	GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f);
 
-	GetCharacterMovement()->JumpZVelocity = 700.f;
+	GetCharacterMovement()->JumpZVelocity = 400.f;
 	GetCharacterMovement()->AirControl = 0.35f;
 	GetCharacterMovement()->MaxWalkSpeed = 500.f;
 	GetCharacterMovement()->MinAnalogWalkSpeed = 20.f;
@@ -70,6 +70,8 @@ void AParkourCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 	PlayerInputComponent->BindAction("Jump", IE_Released, this, &ACharacter::StopJumping);
 	PlayerInputComponent->BindAction("Crouch", IE_Pressed, this, &AParkourCharacter::ParkourCrouch);
 	PlayerInputComponent->BindAction("Slide", IE_Pressed, this, &AParkourCharacter::Slide);
+	PlayerInputComponent->BindAction("Dash", IE_Pressed, this, &AParkourCharacter::DashPressed);
+	PlayerInputComponent->BindAction("Dash", IE_Released, this, &AParkourCharacter::DashReleased);
 }
 
 #pragma region INPUT
@@ -126,6 +128,16 @@ void AParkourCharacter::ParkourCrouch()
 void AParkourCharacter::Slide()
 {
 	SLOG(FColor::Yellow, "[Warning]: NO LOGIC FOR SLIDE IMPLEMENTED YET!")
+}
+
+void AParkourCharacter::DashPressed() 
+{
+	ParkourMovement->DashPressed();
+}
+
+void AParkourCharacter::DashReleased()
+{
+	ParkourMovement->DashReleased();
 }
 
 #pragma endregion
