@@ -1,12 +1,20 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
+/**
+* Sliding exist.
+* Wall Running Exist
+* I need to match the animation state.
+* 
+* Wall related movements - Not Implemented
+* 
+*/
 
 #include "ParkourMovementComponent.h"
-#include "Parkour/Character/ParkourCharacter.h"
+#include "../Parkour.h"
+#include "Animation/AnimMontage.h"
+#include "Animation/AnimInstance.h"
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/Character.h"
 #include "Net/UnrealNetwork.h"
-#include "../Parkour.h"
+#include "Parkour/Character/ParkourCharacter.h"
 
 #pragma region SAVED MOVE
 UParkourMovementComponent::FSavedMove_Parkour::FSavedMove_Parkour()
@@ -26,6 +34,7 @@ void UParkourMovementComponent::FSavedMove_Parkour::Clear()
 	Saved_bTransitionFinished = 0;
 
 	Saved_bWallRunIsRight = 0;
+	Saved_bWantsToClimb = 0;
 
 }
 
@@ -43,6 +52,7 @@ void UParkourMovementComponent::FSavedMove_Parkour::SetMoveFor(ACharacter* C, fl
 	Saved_bTransitionFinished = CharacterMovement->Safe_bTransitionFinished;
 
 	Saved_bWallRunIsRight = CharacterMovement->Safe_bWallRunIsRight;
+	Saved_bWantsToClimb = CharacterMovement->Safe_bWantsToClimb;
 
 }
 
@@ -54,6 +64,9 @@ bool UParkourMovementComponent::FSavedMove_Parkour::CanCombineWith(const FSavedM
 		return false;
 
 	if (Saved_bWantsToDash != NewParkourMove->Saved_bWantsToDash)
+		return false;
+
+	if (Saved_bWantsToClimb != NewParkourMove->Saved_bWantsToClimb)
 		return false;
 
 	return FSavedMove_Character::CanCombineWith(NewMove, InCharacter, MaxDelta);
@@ -73,6 +86,7 @@ void UParkourMovementComponent::FSavedMove_Parkour::PrepMoveFor(ACharacter* C)
 	CharacterMovement->Safe_bTransitionFinished = Saved_bTransitionFinished;
 
 	CharacterMovement->Safe_bWallRunIsRight = Saved_bWallRunIsRight;
+	CharacterMovement->Safe_bWantsToClimb = Saved_bWantsToClimb;
 
 }
 
@@ -161,9 +175,11 @@ float UParkourMovementComponent::GetMaxSpeed() const
 		return MaxWallRunSpeed;
 	case CMOVE_Hang:
 		return 0.f;
+	case CMOVE_Climb:
+		return MaxWallClimbSpeed;
 	default:
 		UE_LOG(LogTemp, Fatal, TEXT("Invalid Movement Mode"));
-		return -1.f;
+		return 0.f;
 	}
 }
 
@@ -179,6 +195,8 @@ float UParkourMovementComponent::GetMaxBrakingDeceleration() const
 		return 0.f;
 	case CMOVE_Hang:
 		return 0.f;
+	case CMOVE_Climb:
+		return BreakingDecelerationClimbing;
 	default:
 		UE_LOG(LogTemp, Fatal, TEXT("Invalid Movement Mode"))
 			return -1.f;
@@ -193,9 +211,12 @@ bool UParkourMovementComponent::CanAttemptJump() const
 bool UParkourMovementComponent::DoJump(bool bReplayingMoves)
 {
 	bool bWasWallRunning = IsWallRunning();
+	bool bWasClimbing = IsWallClimbing();
 
-	FWallInfo* WallInfo = new FWallInfo();
-	GetWallDetails(WallInfo);
+	if (TryParkour())
+	{
+		return false;
+	}
 
 	if (Super::DoJump(bReplayingMoves))
 	{
@@ -209,7 +230,17 @@ bool UParkourMovementComponent::DoJump(bool bReplayingMoves)
 			GetWorld()->LineTraceSingleByProfile(WallHit, Start, End, "BlockAll", Params);
 			Velocity += WallHit.Normal * WallJumpOffForce;
 		}
+		else if (bWasClimbing)
+		{
+			FVector Start = UpdatedComponent->GetComponentLocation();
+			FVector End = Start + UpdatedComponent->GetForwardVector() * CapR() + FVector::UpVector * CapHH() * 0.5f;
+			auto Params = ParkourCharacterOwner->GetIgnoreCharacterParams();
+			FHitResult WallHit;
+			GetWorld()->LineTraceSingleByProfile(WallHit, Start, End, "BlockAll", Params);
+			Velocity += WallHit.Normal * WallJumpOffForce;
+		}
 
+		bOrientRotationToMovement = true;
 		return true;
 	}
 
@@ -262,6 +293,11 @@ void UParkourMovementComponent::UpdateCharacterStateBeforeMovement(float DeltaSe
 		TryWallRun();
 	}
 
+	if (IsFalling() && CharacterOwner->GetInputAxisValue(FName("Move Forward")) >= 0.f && Safe_bWantsToClimb == false)
+	{
+		TryClimb();
+	}
+
 	Super::UpdateCharacterStateBeforeMovement(DeltaSeconds);
 
 }
@@ -298,6 +334,9 @@ void UParkourMovementComponent::PhysCustom(float deltaTime, int32 Iterations)
 	case CMOVE_WallRun:
 		PhysWallRun(deltaTime, Iterations);
 		break;
+	case CMOVE_Climb:
+		PhysWallClimb(deltaTime, Iterations);
+		break;
 	case CMOVE_Hang:
 		break;
 	default:
@@ -315,15 +354,18 @@ void UParkourMovementComponent::OnMovementModeChanged(EMovementMode PreviousMove
 {
 	Super::OnMovementModeChanged(PreviousMovementMode, PreviousCustomMode);
 
+	// Slide
 	if (PreviousMovementMode == MOVE_Custom && PreviousCustomMode == CMOVE_Slide) ExitSlide();
 
 	if (IsCustomMovementMode(CMOVE_Slide)) EnterSlide(PreviousMovementMode, (ECustomMovementMode)PreviousCustomMode);
 
-	if (IsFalling())
-	{
-		bOrientRotationToMovement = true;
-	}
+	// Falling
+	if (IsFalling()){ bOrientRotationToMovement = true; }
 
+	// Climbing
+	if (IsWallClimbing()) { bOrientRotationToMovement = false;}
+
+	// WallRun
 	if (IsWallRunning() && GetOwnerRole() == ROLE_SimulatedProxy)
 	{
 		FVector Start = UpdatedComponent->GetComponentLocation();
@@ -600,8 +642,10 @@ void UParkourMovementComponent::PerformDash()
 bool UParkourMovementComponent::TryWallRun()
 {
 	if (!IsFalling()) return false;
+
 	if (Velocity.SizeSquared2D() < pow(MinWallRunSpeed, 2)) return false;
-	if (Velocity.Z < -MaxVerticalWallRunSpeed) return false;
+
+	if (Velocity.Z < -MaxVerticalWallRunSpeed * 2) return false;
 
 	FVector Start = UpdatedComponent->GetComponentLocation();
 	FVector LeftEnd = Start - UpdatedComponent->GetRightVector() * CapR() * 2;
@@ -610,28 +654,26 @@ bool UParkourMovementComponent::TryWallRun()
 	auto Params = ParkourCharacterOwner->GetIgnoreCharacterParams();
 	FHitResult FloorHit, WallHit;
 
-
 	// Check Player Height
 	if (GetWorld()->LineTraceSingleByProfile(FloorHit, Start, Start + FVector::DownVector * (CapHH() + MinWallRunHeight), "BlockAll", Params))
 	{
 		return false;
 	}
 
-
-	// Left Cast
-	GetWorld()->LineTraceSingleByProfile(WallHit, Start, LeftEnd, "BlockAll", Params);
+	// Right Cast
+	GetWorld()->LineTraceSingleByProfile(WallHit, Start, RightEnd, "BlockAll", Params);
 	if (WallHit.IsValidBlockingHit() && (Velocity | WallHit.Normal) < 0)
 	{
-		Safe_bWallRunIsRight = false;
+		Safe_bWallRunIsRight = true;
 	}
 
-	// Right Cast
+	// Left Cast
 	else
 	{
-		GetWorld()->LineTraceSingleByProfile(WallHit, Start, RightEnd, "BlockAll", Params);
+		GetWorld()->LineTraceSingleByProfile(WallHit, Start, LeftEnd, "BlockAll", Params);
 		if (WallHit.IsValidBlockingHit() && (Velocity | WallHit.Normal) < 0)
 		{
-			Safe_bWallRunIsRight = true;
+			Safe_bWallRunIsRight = false;
 		}
 		else
 		{
@@ -640,19 +682,25 @@ bool UParkourMovementComponent::TryWallRun()
 	}
 
 	FVector ProjectedVelocity = FVector::VectorPlaneProject(Velocity, WallHit.Normal);
-	if (ProjectedVelocity.SizeSquared2D() < pow(MinWallRunSpeed, 2)) return false;
+	if (ProjectedVelocity.SizeSquared2D() < MinWallRunSpeed * MinWallRunSpeed) return false;
 
 	// Passed all conditions
 	Velocity = ProjectedVelocity;
 	Velocity.Z = FMath::Clamp(Velocity.Z, 0.f, MaxVerticalWallRunSpeed);
 	SetMovementMode(MOVE_Custom, CMOVE_WallRun);
-	DLOG(FString::Printf(TEXT("Tried to Wall Run!")), FColor::Green);
+
 	return true;
 }
 
+/**
+* When on wall, turnoff bUseControlRotation.
+* Rotate character so that he is facing the wall
+* Jump out of wall when detaching { Not always }
+* Jump away from wall.
+* Even while detaching, push away and detach.
+*/
 void UParkourMovementComponent::PhysWallRun(float deltaTime, int32 Iterations)
 {
-
 	if (deltaTime < MIN_TICK_TIME)
 	{
 		return;
@@ -700,15 +748,19 @@ void UParkourMovementComponent::PhysWallRun(float deltaTime, int32 Iterations)
 		Acceleration.Z = 0.f;
 
 		// Apply acceleration
-		CalcVelocity(timeTick, 0.f, false, GetMaxBrakingDeceleration());
+		CalcVelocity(timeTick, WallFriction, false, GetMaxBrakingDeceleration());
 		Velocity = FVector::VectorPlaneProject(Velocity, WallHit.Normal);
 		float TangentAccel = Acceleration.GetSafeNormal() | Velocity.GetSafeNormal2D();
 		bool bVelUp = Velocity.Z > 0.f;
 
 		if (WallRunGravityScaleCurve)
+		{
 			Velocity.Z += GetGravityZ() * WallRunGravityScaleCurve->GetFloatValue(bVelUp ? 0.f : TangentAccel) * timeTick;
+		}
 		else
-			UE_LOG(LogTemp, Fatal, TEXT("You have not plugged in Gravity Scale Curve"));
+		{
+			UE_LOG(LogTemp, Fatal, TEXT("You have not plugged in Gravity Scale Curve")); return;
+		}
 
 		if (Velocity.SizeSquared2D() < pow(MinWallRunSpeed, 2) || Velocity.Z < -MaxVerticalWallRunSpeed)
 		{
@@ -741,7 +793,7 @@ void UParkourMovementComponent::PhysWallRun(float deltaTime, int32 Iterations)
 		Velocity = (UpdatedComponent->GetComponentLocation() - OldLocation) / timeTick; // v = dx / dt
 	}
 
-
+	// Finding vector towards the wall.
 	FVector Start = UpdatedComponent->GetComponentLocation();
 	FVector CastDelta = UpdatedComponent->GetRightVector() * CapR() * 2;
 	FVector End = Safe_bWallRunIsRight ? Start + CastDelta : Start - CastDelta;
@@ -760,11 +812,182 @@ void UParkourMovementComponent::PhysWallRun(float deltaTime, int32 Iterations)
 
 #pragma endregion
 
-#pragma region PARKOUR
-bool UParkourMovementComponent::TryParkour(FWallInfo* WallInfo)
-{
+#pragma region WALL CLIMB
 
-	return false;
+bool UParkourMovementComponent::CanWallClimb() const
+{
+	return bCanWallClimb && IsFalling();
+}
+
+bool UParkourMovementComponent::TryClimb()	
+{
+	if (!CanWallClimb()) return false;
+	if (CharacterOwner->GetInputAxisValue(FName("Move Forward")) <= 0.f) {return false;}
+
+	FVector Start = UpdatedComponent->GetComponentLocation() + FVector::UpVector * CapHH() * 0.5f;
+	FVector End = UpdatedComponent->GetForwardVector() * WallReachLength + Start;
+
+	auto Params = ParkourCharacterOwner->GetIgnoreCharacterParams();
+	FHitResult WallHit;
+
+	// Get the wall
+	DrawDebugLine(GetWorld(), Start, End, FColor::Emerald, false, 10.f);
+	if (!GetWorld()->LineTraceSingleByProfile(WallHit, Start, End, "BlockAll", Params)) return false;
+
+	if (!WallHit.IsValidBlockingHit()) { return false; }
+	
+	// If Wall Is Climbable
+	FQuat WallDirect = FRotationMatrix::MakeFromX(WallHit.Normal * -1).ToQuat();
+	FHitResult Hit;
+	SafeMoveUpdatedComponent(FVector::ZeroVector, WallDirect, false, Hit);
+	SetMovementMode(MOVE_Custom, CMOVE_Climb);
+	return true;
+}
+
+void UParkourMovementComponent::PhysWallClimb(float deltaTime, int32 Iterations)
+{
+	if (deltaTime < MIN_TICK_TIME)
+		return;
+	
+	if (!CharacterOwner || (!CharacterOwner->Controller && !bRunPhysicsWithNoController && !HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity() && (CharacterOwner->GetLocalRole() != ROLE_SimulatedProxy)))
+	{
+		Acceleration = FVector::ZeroVector;
+		Velocity = FVector::ZeroVector;
+		return;
+	}
+
+	bJustTeleported = false;
+	float remainingTime = deltaTime;
+
+	while ((remainingTime >= MIN_TICK_TIME) && (Iterations < MaxSimulationIterations) && CharacterOwner && (CharacterOwner->Controller || bRunPhysicsWithNoController || (CharacterOwner->GetLocalRole() == ROLE_SimulatedProxy)))
+	{
+		Iterations++;
+		bJustTeleported = false;
+		const float timeTick = GetSimulationTimeStep(remainingTime, Iterations);
+		remainingTime -= timeTick;
+
+		float fwd = CharacterOwner->GetInputAxisValue(FName("Move Forward"));
+		float rhs = CharacterOwner->GetInputAxisValue(FName("Move Right"));
+
+		FHitResult WallHit;
+		auto Params = ParkourCharacterOwner->GetIgnoreCharacterParams();
+		FVector OldLocation = UpdatedComponent->GetComponentLocation();
+		FVector Start = OldLocation;
+		FVector End = Start + CharacterOwner->GetActorForwardVector() * 10.f + FVector::UpVector * 0.5f;
+
+		GetWorld()->LineTraceSingleByProfile(WallHit, Start, End, "BlockAll", Params);
+		bool bWantsToPullAway = !WallHit.IsValidBlockingHit() && fwd <= 0.f;
+
+		if (bWantsToPullAway)
+		{
+			SetMovementMode(MOVE_Falling);
+			StartNewPhysics(remainingTime, Iterations);
+			return;
+		}
+
+		Acceleration = FVector::VectorPlaneProject(Acceleration, WallHit.Normal);
+
+		// Check Movement Mode and Apply acceleration
+		if (MovementMode == EMovementMode::MOVE_Custom)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Move_Custom"));
+			if (IsCustomMovementMode(ECustomMovementMode::CMOVE_Climb))
+			{
+				UE_LOG(LogTemp, Warning, TEXT("CMove_Climb"));
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("CMOVE_Something Else"));
+			}
+		}
+
+		CalcVelocity(timeTick, WallClimbFriction, false, GetMaxBrakingDeceleration());
+		Velocity = FVector::VectorPlaneProject(Velocity, WallHit.Normal);
+		Velocity.Z = WallClimbSpeed;
+
+		if (Velocity.Z <= 0.f)
+		{
+			SetMovementMode(MOVE_Falling);
+			StartNewPhysics(remainingTime, Iterations);
+			return;
+		}
+
+		// Compute move parameters
+		const FVector Delta = timeTick * Velocity; // dx = v * dt
+		const bool bZeroDelta = Delta.IsNearlyZero();
+		if (bZeroDelta){
+			remainingTime = 0.f;
+		}
+		else{
+			FHitResult Hit;
+			SafeMoveUpdatedComponent(Delta, UpdatedComponent->GetComponentQuat(), true, Hit);
+		}
+
+		if (UpdatedComponent->GetComponentLocation() == OldLocation)
+		{
+			remainingTime = 0.f;
+			break;
+		}
+
+		Velocity = (UpdatedComponent->GetComponentLocation() - OldLocation) / timeTick;
+	}
+	
+	// Finding vector towards the wall.
+	FVector Start = UpdatedComponent->GetComponentLocation();
+	FVector End = Start + CharacterOwner->GetActorForwardVector() * 10.f + FVector::UpVector * CapHH() * 0.5f;
+	auto Params = ParkourCharacterOwner->GetIgnoreCharacterParams();
+	FHitResult WallHit;
+
+	GetWorld()->LineTraceSingleByProfile(WallHit, Start, End, "BlockAll", Params);
+
+	if (!WallHit.IsValidBlockingHit() || Velocity.Z <= 0.f)
+	{
+		SetMovementMode(MOVE_Falling);
+	}
+}
+
+// Wall Hang.
+
+#pragma endregion
+
+#pragma region PARKOUR
+bool UParkourMovementComponent::TryParkour()
+{
+	FWallInfo* WallInfo = new FWallInfo();
+	if (!GetWallDetails(OUT WallInfo))
+	{
+		return false;
+	}
+
+	if (WallInfo->WallDistance < 220.f && WallInfo->WallDistance >= 100.f && WallInfo->wallHeight < 110.f && WallInfo->wallWidth < 120.f)
+	{
+		if (Anim_ThinWallCross)
+		{
+			CharacterOwner->PlayAnimMontage(Anim_ThinWallCross);
+			return true;
+		}
+		else
+		{
+			LOG(FString::Printf(TEXT("Missing Anim For Wall Cross")), FColor::Red);
+		}
+	}
+	else
+	{
+		LOG(FString::Printf(TEXT("No Valid Condition!!")), FColor::Red);
+		return false;
+	}
+
+
+
+	/*
+	* Thin Walls -> Keep your hands on wall and jump over it.
+	* Thick Walls -> Do a front flip over it.
+	* High-Thin Walls -> Climb over and jump other side.
+	* High-Thick Walls -> Just climb such walls.
+	* 
+	*/
+	
+	return true;
 }
 
 #pragma endregion
@@ -790,7 +1013,7 @@ float UParkourMovementComponent::CapHH() const
 /// Debug Green indicate width and cyan indicates height.
 /// </summary>
 /// <param name="WallDetails"> - Fill the struct with info related to the wall detected.</param>
-void UParkourMovementComponent::GetWallDetails(OUT FWallInfo* WallDetails)
+bool UParkourMovementComponent::GetWallDetails(OUT FWallInfo* WallDetails)
 {
 	// Retrieve Basic Info
 	FVector BaseLoc = UpdatedComponent->GetComponentLocation() + FVector::DownVector * CapHH();
@@ -811,7 +1034,7 @@ void UParkourMovementComponent::GetWallDetails(OUT FWallInfo* WallDetails)
 	}
 
 	// Checking if wall is there or not.
-	if (!FrontHit.IsValidBlockingHit()) return;
+	if (!FrontHit.IsValidBlockingHit()) return false;
 	
 	// Distance To Wall
 	WallDetails->WallDistance = (FrontHit.Location - GetActorLocation()).Length();
@@ -841,7 +1064,7 @@ void UParkourMovementComponent::GetWallDetails(OUT FWallInfo* WallDetails)
 	LINE(TraceStart, FrontHit.Location + Fwd, FColor::Purple);
 
 	bool btraced = GetWorld()->LineTraceMultiByProfile(HeightHits, TraceStart, FrontHit.Location + Fwd, "BlockAll", Params);
-	if (!btraced) return;
+	if (!btraced) return false;
 		
 	for (const FHitResult& Hit : HeightHits)
 	{
@@ -860,7 +1083,7 @@ void UParkourMovementComponent::GetWallDetails(OUT FWallInfo* WallDetails)
 	}
 	else
 	{
-		return;
+		return false;
 	}
 
 #pragma endregion
@@ -874,7 +1097,7 @@ void UParkourMovementComponent::GetWallDetails(OUT FWallInfo* WallDetails)
 	POINT(WidthTraceStart, FColor::Green);
 	
 	btraced = GetWorld()->LineTraceMultiByProfile(WidthHits, WidthTraceStart, FrontHit.Location, "BlockAll", Params);
-	if (!btraced) return;
+	if (!btraced) return false;
 
 	for (const FHitResult& Hit : WidthHits)
 	{
@@ -950,6 +1173,8 @@ void UParkourMovementComponent::GetWallDetails(OUT FWallInfo* WallDetails)
 	{	
 		DisplayWallDetails(WallDetails);
 	}
+	
+	return true;
 }
 
 void UParkourMovementComponent::DisplayWallDetails(OUT FWallInfo* WallInfo)
@@ -969,7 +1194,6 @@ void UParkourMovementComponent::DisplayWallDetails(OUT FWallInfo* WallInfo)
 }
 
 #pragma endregion
-
 
 #pragma region INTERFACE
 void UParkourMovementComponent::DashPressed()
@@ -1002,7 +1226,6 @@ bool UParkourMovementComponent::IsMovementMode(EMovementMode InMovementMode) con
 }
 
 #pragma endregion
-
 
 #pragma region REPLICATION
 

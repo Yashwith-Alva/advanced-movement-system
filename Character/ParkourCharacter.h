@@ -10,6 +10,17 @@
 class USpringArmComponent;
 class UCameraComponent;
 
+UENUM(BlueprintType)
+enum class EJumpLandType : uint8
+{
+	EJLT_None	UMETA(DisplayName = "None"),
+	EJLT_Normal UMETA(DisplayName = "Normal Land"),
+	EJLT_Hard	UMETA(DisplayName = "Hard Land"),
+	EJLT_Roll	UMETA(DisplayName = "Roll"),
+	EJLT_Max    UMETA(DisplayName = "MAX")
+};
+
+
 UCLASS()
 class AParkourCharacter : public ACharacter
 {
@@ -24,6 +35,8 @@ public:
 
 	class UParkourMovementComponent* ParkourMovement;
 
+protected:
+	virtual void BeginPlay() override;
 
 protected:
 	UPROPERTY(VisibleAnywhere, Category = "Spring Arm")
@@ -35,9 +48,16 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Movement | Direction")
 		bool bStrafeIsAllowed = true;
 
-protected:
-	virtual void BeginPlay() override;
+public:
+	// Animation Data Helpers
+	UPROPERTY(BlueprintReadOnly, Category = "Animation | Falling")
+		EJumpLandType LandType = EJumpLandType::EJLT_None;
 
+	UPROPERTY(EditDefaultsOnly, Category = "Movement | Fall Speed Squared")
+		float HardLandMinSpeed = 1000.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Movement | Fall Speed Squared")
+		float RollLandMinSpeed = 1000.f;
 #pragma region INPUT 
 
 protected:

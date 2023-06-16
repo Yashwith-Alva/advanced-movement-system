@@ -4,7 +4,6 @@
 #include "Parkour/Component/ParkourMovementComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
-
 // Helper Macros
 #if 1
 float WriteDuration = 2.f;
@@ -52,7 +51,29 @@ void AParkourCharacter::BeginPlay()
 void AParkourCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+	
+	float Zvel = GetVelocity().Z;
+	
+	if (MOVE_Falling && Zvel < 0) 
+	{
+		if (Zvel < RollLandMinSpeed)
+		{
+			LandType = EJumpLandType::EJLT_Roll;
+		}
+		else if (Zvel < HardLandMinSpeed)
+		{
+			LandType = EJumpLandType::EJLT_Hard;
+		}
+		else
+		{
+			LandType = EJumpLandType::EJLT_Normal;
+		}
+	}
 
+	if (ParkourMovement->IsCustomMovementMode(ECustomMovementMode::CMOVE_Climb))
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Red, FString::Printf(TEXT("MOVE_climb")));
+	}
 }
 
 void AParkourCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)

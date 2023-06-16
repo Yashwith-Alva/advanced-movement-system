@@ -23,16 +23,6 @@ enum ECustomMovementMode
 	CMOVE_MAX			UMETA(Hidden),
 };
 
-/* Wall Adjust Enum */
-UENUM(BlueprintType)
-enum EWallAdjustSide 
-{
-	EWAS_None	UMETA(DisplayName = "None"),
-	EWAS_Right  UMETA(DisplayName = "Right"),
-	EWAS_Left   UMETA(DisplayName = "Left"),
-	EWAS_MAX	UMETA(Hidden)
-};
-
 /* Object Info Struct */
 USTRUCT(BlueprintType)
 struct FWallInfo {
@@ -106,6 +96,7 @@ private:
 		uint8 Saved_bTransitionFinished : 1;
 		uint8 Saved_bWantsToSlide : 1;
 		uint8 Saved_bWallRunIsRight : 1;
+		uint8 Saved_bWantsToClimb : 1;
 
 		FSavedMove_Parkour();
 
@@ -155,13 +146,22 @@ private:
 
 	// Wall Run
 	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Run") float MinWallRunSpeed = 200.f;
-	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Run") float MaxWallRunSpeed = 800.f;
+	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Run") float MaxWallRunSpeed = 1200.f;
 	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Run") float MaxVerticalWallRunSpeed = 200.f;
 	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Run") float WallRunPullAwayAngle = 75;
 	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Run") float WallAttractionForce = 200.f;
 	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Run") float MinWallRunHeight = 50.f;
 	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Run") UCurveFloat* WallRunGravityScaleCurve;
 	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Run") float WallJumpOffForce = 300.f;
+	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Run") float WallFriction = 0.5f;
+	
+	// Wall Climb
+	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Climb") float WallClimbSpeed = 300.f;
+	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Climb") float MaxWallClimbSpeed = 300.f;
+	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Climb") float WallClimbFriction = 0.f;
+	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Climb") float BreakingDecelerationClimbing = 8.f;
+	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Climb") float WallReachLength = 100.f;
+	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Climb") bool bCanWallClimb = true;
 
 	// Wall Details
 	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Movement") float WallDistance = 100.f;
@@ -172,6 +172,8 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Movement") float ClearanceDepth = 100.f;
 	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Wall Movement") float ClearanceEdgeLen = 100.f;
 
+	// Parkour
+	UPROPERTY(EditDefaultsOnly, Category = "Parkour Animation | Parkour") UAnimMontage* Anim_ThinWallCross;
 	
 	// Debuggers
 	UPROPERTY(EditDefaultsOnly, Category = "Parkour Movement | Debug Movement") bool bWallDebug = false;
@@ -186,6 +188,7 @@ private:
 
 	bool Safe_bHadAnimRootMotion;
 	bool Safe_bWantsToSlide;
+	bool Safe_bWantsToClimb;
 
 	float DashStartTime;
 	FTimerHandle TimerHandle_DashCooldown;
@@ -257,8 +260,13 @@ private:
 	bool TryWallRun();
 	void PhysWallRun(float deltaTime, int32 Iterations);
 
+	// WallClimb
+	bool CanWallClimb() const;
+	bool TryClimb();
+	void PhysWallClimb(float deltaTime, int32 Iterations);
+
 	// Parkour
-	bool TryParkour(FWallInfo* WallInfo);
+	bool TryParkour();
 
 #pragma endregion
 
@@ -266,7 +274,7 @@ private:
 	bool IsServer() const;
 	float CapR() const;
 	float CapHH() const;
-	void GetWallDetails(OUT FWallInfo* WallDetails);
+	bool GetWallDetails(OUT FWallInfo* WallDetails);
 
 #pragma region Interface
 public:
@@ -278,6 +286,8 @@ public:
 
 	UFUNCTION(BlueprintPure) bool IsWallRunning() const { return IsCustomMovementMode(CMOVE_WallRun); }
 	UFUNCTION(BlueprintPure) bool WallRunningIsRight() const { return Safe_bWallRunIsRight; }
+	UFUNCTION(BlueprintPure) bool IsWallClimbing() const { return IsCustomMovementMode(CMOVE_Climb); }
+	UFUNCTION(BlueprintPure) bool IsWallHang() const { return IsCustomMovementMode(CMOVE_Hang); }
 
 #pragma endregion
 
